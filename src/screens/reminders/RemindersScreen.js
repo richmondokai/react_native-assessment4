@@ -12,6 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDarkMode } from '../../hooks/useDarkMode';
 
+// Define storage key for reminders
+const REMINDERS_KEY = 'REMINDERS_DATA';
+
 const RemindersScreen = ({ navigation }) => {
   const [reminders, setReminders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,11 +41,16 @@ const RemindersScreen = ({ navigation }) => {
   const loadReminders = async () => {
     try {
       setLoading(true);
-      const storedReminders = await AsyncStorage.getItem('reminders');
+      console.log('=== REMINDERS SCREEN DEBUG ===');
+      console.log('Loading reminders from storage key:', REMINDERS_KEY);
+      const storedReminders = await AsyncStorage.getItem(REMINDERS_KEY);
       
       if (storedReminders) {
-        setReminders(JSON.parse(storedReminders));
+        const remindersList = JSON.parse(storedReminders);
+        console.log('Found reminders in storage:', remindersList.length);
+        setReminders(remindersList);
       } else {
+        console.log('No reminders found, creating sample data');
         // Sample reminders for first-time users
         const sampleReminders = [
           {
@@ -67,9 +75,11 @@ const RemindersScreen = ({ navigation }) => {
             priority: 'low'
           }
         ];
-        await AsyncStorage.setItem('reminders', JSON.stringify(sampleReminders));
+        await AsyncStorage.setItem(REMINDERS_KEY, JSON.stringify(sampleReminders));
         setReminders(sampleReminders);
+        console.log('Sample reminders created');
       }
+      console.log('=== END REMINDERS SCREEN DEBUG ===');
     } catch (error) {
       console.log('Error loading reminders:', error);
     } finally {
@@ -79,15 +89,21 @@ const RemindersScreen = ({ navigation }) => {
 
   const toggleReminderStatus = async (id) => {
     try {
+      console.log('=== TOGGLING REMINDER STATUS ===');
+      console.log('Reminder ID:', id);
       const updatedReminders = reminders.map(reminder => {
         if (reminder.id === id) {
-          return { ...reminder, completed: !reminder.completed };
+          const newStatus = !reminder.completed;
+          console.log('Changing reminder status from', reminder.completed, 'to', newStatus);
+          return { ...reminder, completed: newStatus };
         }
         return reminder;
       });
       
       setReminders(updatedReminders);
-      await AsyncStorage.setItem('reminders', JSON.stringify(updatedReminders));
+      await AsyncStorage.setItem(REMINDERS_KEY, JSON.stringify(updatedReminders));
+      console.log('Reminder status updated and saved');
+      console.log('=== END TOGGLE REMINDER ===');
     } catch (error) {
       console.log('Error updating reminder:', error);
     }

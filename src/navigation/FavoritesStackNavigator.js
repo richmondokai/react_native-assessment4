@@ -1,6 +1,5 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
-import { useColorScheme } from 'react-native';
 
 import FavoritesScreen from '../screens/notes/FavoritesScreen';
 import NoteDetailScreen from '../screens/notes/NoteDetailScreen';

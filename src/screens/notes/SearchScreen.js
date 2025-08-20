@@ -11,6 +11,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDarkMode } from '../../hooks/useDarkMode';
+import { NOTES_KEY } from '../../constants';
+import { useAuth } from '../../context/AuthContext';
+import { getLocalNotes } from '../../services/notes_local_services';
 
 const SearchScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -19,10 +22,18 @@ const SearchScreen = ({ navigation }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  const { user } = useAuth();
 
   useEffect(() => {
     loadNotes();
-  }, []);
+    
+    // Set up a listener for when we return to this screen to refresh notes
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadNotes();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
 
   useEffect(() => {
     if (searchQuery.trim().length > 0) {
@@ -34,11 +45,33 @@ const SearchScreen = ({ navigation }) => {
 
   const loadNotes = async () => {
     try {
-      const storedNotes = await AsyncStorage.getItem('notes');
-      if (storedNotes) {
-        const notesArray = JSON.parse(storedNotes);
-        setAllNotes(notesArray);
+      console.log('=== SEARCH SCREEN DEBUG ===');
+      const userId = user?.email || user?.id;
+      
+      if (!userId) {
+        console.log('No user ID available for search');
+        setAllNotes([]);
+        setIsLoading(false);
+        return;
       }
+      
+      console.log('Loading notes for search, user:', userId);
+      const notesArray = await getLocalNotes(userId);
+      
+      if (notesArray && notesArray.length > 0) {
+        console.log('Found notes for search:', notesArray.length);
+        console.log('Notes data:', notesArray.map(n => ({
+          id: n.id,
+          title: n.title,
+          category: n.category,
+          contentLength: n.content?.length || 0
+        })));
+        setAllNotes(notesArray);
+      } else {
+        console.log('No notes found in storage for search');
+        setAllNotes([]);
+      }
+      console.log('=== END SEARCH SCREEN DEBUG ===');
     } catch (error) {
       console.log('Error loading notes:', error);
     } finally {
@@ -49,14 +82,31 @@ const SearchScreen = ({ navigation }) => {
   const handleSearch = () => {
     setIsSearching(true);
     
+    console.log('=== SEARCH DEBUG ===');
+    console.log('Search query:', searchQuery);
+    console.log('All notes count:', allNotes.length);
+    
     // Simple search implementation - searches in title and content
     const query = searchQuery.toLowerCase().trim();
     const results = allNotes.filter(note => {
-      return (
-        note.title.toLowerCase().includes(query) ||
-        note.content.toLowerCase().includes(query)
-      );
+      const title = (note.title || '').toLowerCase();
+      const content = (note.content || '').toLowerCase();
+      const matches = title.includes(query) || content.includes(query);
+      
+      if (matches) {
+        console.log('Found match:', {
+          id: note.id,
+          title: note.title,
+          titleMatch: title.includes(query),
+          contentMatch: content.includes(query)
+        });
+      }
+      
+      return matches;
     });
+    
+    console.log('Search results count:', results.length);
+    console.log('=== END SEARCH DEBUG ===');
     
     setSearchResults(results);
     setIsSearching(false);

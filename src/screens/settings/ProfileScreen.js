@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -12,9 +12,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../../context/AuthContext';
 import { useDarkMode } from '../../hooks/useDarkMode';
+import { useNotes } from '../../context/NotesContext';
+import { NOTES_KEY, USER_KEY } from '../../constants';
+import { getLocalNotes } from '../../services/notes_local_services';
 
-const ProfileScreen = () => {
+const ProfileScreen = ({ navigation }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -23,7 +27,232 @@ const ProfileScreen = () => {
   const [email, setEmail] = useState('john.doe@example.com');
   const [bio, setBio] = useState('I love taking notes and staying organized!');
   
+  // Stats data
+  const [stats, setStats] = useState({
+    totalNotes: 0,
+    favoriteNotes: 0,
+    categories: 0
+  });
+  
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  const { logout, user } = useAuth();
+  const { notes } = useNotes();
+  
+  // Track last refresh time to prevent excessive refreshing
+  const lastRefreshTimeRef = useRef(0);
+  const DEBOUNCE_TIME = 2000; // 2 seconds
+  
+  // Safety timeout to prevent stuck loading state
+  useEffect(() => {
+    const safetyTimeout = setTimeout(() => {
+      if (isSaving) {
+        console.log('Safety timeout triggered - forcing saving state off');
+        setIsSaving(false);
+      }
+    }, 10000); // 10 second safety timeout
+    
+    return () => clearTimeout(safetyTimeout);
+  }, [isSaving]);
+  
+  // Set navigation options
+  React.useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: true
+    });
+  }, [navigation]);
+  
+  // Load profile data and stats on component mount
+  useEffect(() => {
+    loadProfileData();
+    loadStatsData();
+    
+    // Set up a listener for when we return to this screen to refresh stats
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('=== PROFILE SCREEN FOCUS LISTENER ===');
+      console.log('ProfileScreen focused - checking if stats need refresh');
+      
+      const now = Date.now();
+      const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
+      
+      // Only refresh if we haven't refreshed recently to avoid interfering with real-time updates
+      if (timeSinceLastRefresh > DEBOUNCE_TIME) {
+        lastRefreshTimeRef.current = now;
+        console.log('Refreshing stats on focus');
+        loadStatsData(); // Refresh stats when returning to screen
+      } else {
+        console.log(`Skipping stats refresh - last refresh was ${timeSinceLastRefresh}ms ago`);
+        // Even if we skip the refresh, ensure stats are up to date from notes context
+        if (user && Array.isArray(notes)) {
+          console.log('Updating stats from notes context on focus (skipped refresh)');
+          // The real-time effect will handle the update
+        }
+      }
+      console.log('=== END PROFILE SCREEN FOCUS LISTENER ===');
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  // Real-time stats update when notes change
+  useEffect(() => {
+    console.log('=== PROFILE SCREEN STATS UPDATE EFFECT ===');
+    console.log('ProfileScreen: Notes or user changed, updating stats');
+    console.log('Notes count:', notes?.length || 0);
+    console.log('User:', user?.email || user?.id);
+    
+    // Directly update stats when notes change
+    if (user && Array.isArray(notes)) {
+      if (notes.length > 0) {
+        console.log('Updating stats from notes context:', notes.length);
+        
+        const totalNotes = notes.length;
+        const favoriteNotes = notes.filter(note => note && note.isFavorite).length;
+        
+        // Get unique categories
+        const categoriesSet = new Set();
+        notes.forEach(note => {
+          if (note && note.category) {
+            categoriesSet.add(note.category);
+          }
+        });
+        const categories = categoriesSet.size;
+        
+        const newStats = {
+          totalNotes,
+          favoriteNotes,
+          categories
+        };
+        
+        // Only update if the stats actually changed
+        const currentStatsString = JSON.stringify(stats);
+        const newStatsString = JSON.stringify(newStats);
+        
+        if (currentStatsString !== newStatsString) {
+          console.log('Stats changed - updating state');
+          console.log('Old stats:', stats);
+          console.log('New stats:', newStats);
+          setStats(newStats);
+        } else {
+          console.log('Stats unchanged - skipping update');
+        }
+      } else {
+        // No notes, set empty stats
+        const emptyStats = { totalNotes: 0, favoriteNotes: 0, categories: 0 };
+        const currentStatsString = JSON.stringify(stats);
+        const newStatsString = JSON.stringify(emptyStats);
+        
+        if (currentStatsString !== newStatsString) {
+          console.log('Stats changed to empty - updating state');
+          setStats(emptyStats);
+        }
+      }
+    }
+    console.log('=== END PROFILE SCREEN STATS UPDATE EFFECT ===');
+  }, [notes, user, stats]); // Depend on notes, user, and stats for change detection
+
+  // Additional effect to track when stats change
+  useEffect(() => {
+    console.log('=== PROFILE SCREEN STATS CHANGE EFFECT ===');
+    console.log('Stats state changed:', stats);
+    console.log('Current stats:', {
+      totalNotes: stats.totalNotes,
+      favoriteNotes: stats.favoriteNotes,
+      categories: stats.categories
+    });
+    console.log('=== END PROFILE SCREEN STATS CHANGE EFFECT ===');
+  }, [stats]);
+  
+  const loadProfileData = async () => {
+    try {
+      console.log('=== PROFILE SCREEN DEBUG ===');
+      console.log('Loading profile from USER_KEY:', USER_KEY);
+      
+      // Try to load from AsyncStorage first
+      const storedProfile = await AsyncStorage.getItem('USER_PROFILE');
+      if (storedProfile) {
+        const profileData = JSON.parse(storedProfile);
+        console.log('Found stored profile:', profileData);
+        setName(profileData.name || 'John Doe');
+        setEmail(profileData.email || 'john.doe@example.com');
+        setBio(profileData.bio || 'I love taking notes and staying organized!');
+      } else if (user) {
+        // Use auth context user data if available
+        console.log('Using auth context user data:', user);
+        setName(user.name || user.username || 'John Doe');
+        setEmail(user.email || 'john.doe@example.com');
+        setBio(user.bio || 'I love taking notes and staying organized!');
+      }
+      console.log('=== END PROFILE LOAD DEBUG ===');
+    } catch (error) {
+      console.log('Error loading profile:', error);
+    }
+  };
+  
+  // Function to get initials from name
+  const getInitials = (fullName) => {
+    if (!fullName || typeof fullName !== 'string') return 'JD';
+    
+    const nameParts = fullName.trim().split(' ').filter(part => part.length > 0);
+    if (nameParts.length === 0) return 'JD';
+    
+    if (nameParts.length === 1) {
+      // Single name - take first two characters
+      return nameParts[0].substring(0, 2).toUpperCase();
+    }
+    
+    // Multiple names - take first letter of first and last name
+    const firstInitial = nameParts[0].charAt(0);
+    const lastInitial = nameParts[nameParts.length - 1].charAt(0);
+    return (firstInitial + lastInitial).toUpperCase();
+  };
+  
+  const loadStatsData = async () => {
+    try {
+      console.log('=== LOAD STATS FUNCTION CALLED ===');
+      console.log('loadStatsData called');
+      console.log('=== LOADING PROFILE STATS ===');
+      const userId = user?.email || user?.id;
+      
+      if (!userId) {
+        console.log('No user ID available for stats');
+        setStats({ totalNotes: 0, favoriteNotes: 0, categories: 0 });
+        return;
+      }
+      
+      console.log('Loading stats for user:', userId);
+      const notesArray = await getLocalNotes(userId);
+      
+      if (notesArray && notesArray.length > 0) {
+        console.log('Found notes for stats:', notesArray.length);
+        
+        const totalNotes = notesArray.length;
+        const favoriteNotes = notesArray.filter(note => note.isFavorite).length;
+        
+        // Get unique categories
+        const categoriesSet = new Set();
+        notesArray.forEach(note => {
+          if (note.category) {
+            categoriesSet.add(note.category);
+          }
+        });
+        const categories = categoriesSet.size;
+        
+        const statsData = {
+          totalNotes,
+          favoriteNotes,
+          categories
+        };
+        
+        console.log('Calculated stats:', statsData);
+        setStats(statsData);
+      } else {
+        console.log('No notes found for stats');
+      }
+      console.log('=== END PROFILE STATS DEBUG ===');
+    } catch (error) {
+      console.log('Error loading stats:', error);
+    }
+  };
   
   const handleSave = async () => {
     if (!name.trim()) {
@@ -47,7 +276,11 @@ const ProfileScreen = () => {
         bio
       };
       
-      await AsyncStorage.setItem('userProfile', JSON.stringify(userProfile));
+      console.log('=== SAVING PROFILE ===');
+      console.log('Profile data to save:', userProfile);
+      await AsyncStorage.setItem('USER_PROFILE', JSON.stringify(userProfile));
+      console.log('Profile saved successfully');
+      console.log('=== END SAVE PROFILE ===');
       
       // Simulate API delay
       setTimeout(() => {
@@ -63,11 +296,10 @@ const ProfileScreen = () => {
   };
   
   const handleChangePassword = () => {
-    Alert.alert(
-      'Change Password',
-      'This feature would allow you to change your password.',
-      [{ text: 'OK' }]
-    );
+    // Navigate to ChangePassword screen in the Settings stack
+    navigation.navigate('Settings', { 
+      screen: 'ChangePassword' 
+    });
   };
   
   const handleLogout = async () => {
@@ -83,9 +315,8 @@ const ProfileScreen = () => {
           text: 'Logout',
           onPress: async () => {
             try {
-              await AsyncStorage.removeItem('userToken');
-              // Force app to re-render by navigating to the auth screen
-              // In a real app, you would use a more robust navigation reset
+              await logout();
+              // The AuthContext will update isAuthenticated and AppNavigator will show auth screens
               Alert.alert('Success', 'You have been logged out');
             } catch (error) {
               console.log('Error logging out:', error);
@@ -104,7 +335,7 @@ const ProfileScreen = () => {
       }]}>
         <View style={styles.profileImageContainer}>
           <View style={styles.profileImage}>
-            <Text style={styles.profileInitials}>JD</Text>
+            <Text style={styles.profileInitials}>{getInitials(name)}</Text>
           </View>
           {isEditing && (
             <TouchableOpacity style={styles.changePhotoButton}>
@@ -242,22 +473,34 @@ const ProfileScreen = () => {
       }]}>
         <Text style={[styles.statsTitle, isDarkMode && { color: darkModeStyles.text.color }]}>Your Stats</Text>
         
-        <View style={styles.statsGrid}>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, isDarkMode && { color: "#4a9eff" }]}>12</Text>
-            <Text style={[styles.statLabel, isDarkMode && { color: darkModeStyles.subText.color }]}>Notes</Text>
-          </View>
+        {(() => {
+          console.log('=== PROFILE SCREEN STATS RENDER ===');
+          console.log('Rendering stats section');
+          console.log('Current stats:', stats);
+          console.log('Notes from context:', notes?.length || 0);
+          console.log('Notes with favorites:', notes?.filter(n => n?.isFavorite)?.length || 0);
+          console.log('Notes with categories:', notes?.map(n => n?.category).filter(Boolean) || []);
+          console.log('=== END STATS RENDER DEBUG ===');
           
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, isDarkMode && { color: "#4a9eff" }]}>5</Text>
-            <Text style={[styles.statLabel, isDarkMode && { color: darkModeStyles.subText.color }]}>Favorites</Text>
-          </View>
-          
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, isDarkMode && { color: "#4a9eff" }]}>4</Text>
-            <Text style={[styles.statLabel, isDarkMode && { color: darkModeStyles.subText.color }]}>Categories</Text>
-          </View>
-        </View>
+          return (
+            <View style={styles.statsGrid}>
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, isDarkMode && { color: "#4a9eff" }]}>{stats.totalNotes}</Text>
+                <Text style={[styles.statLabel, isDarkMode && { color: darkModeStyles.subText.color }]}>Notes</Text>
+              </View>
+              
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, isDarkMode && { color: "#4a9eff" }]}>{stats.favoriteNotes}</Text>
+                <Text style={[styles.statLabel, isDarkMode && { color: darkModeStyles.subText.color }]}>Favorites</Text>
+              </View>
+              
+              <View style={styles.statItem}>
+                <Text style={[styles.statValue, isDarkMode && { color: "#4a9eff" }]}>{stats.categories}</Text>
+                <Text style={[styles.statLabel, isDarkMode && { color: darkModeStyles.subText.color }]}>Categories</Text>
+              </View>
+            </View>
+          );
+        })()}
       </View>
     </ScrollView>
   );

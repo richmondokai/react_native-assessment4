@@ -10,8 +10,11 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useDarkMode } from '../../hooks/useDarkMode';
+import { NOTES_KEY } from '../../constants';
+import { useAuth } from '../../context/AuthContext';
+import { getLocalNotes } from '../../services/notes_local_services';
 
-const StatisticsScreen = () => {
+const StatisticsScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalNotes: 0,
@@ -25,17 +28,47 @@ const StatisticsScreen = () => {
   });
   
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  const { user } = useAuth();
 
   useEffect(() => {
     calculateStats();
-  }, []);
+    
+    // Set up a listener for when we return to this screen to refresh stats
+    const unsubscribe = navigation.addListener('focus', () => {
+      calculateStats();
+    });
+
+    return unsubscribe;
+  }, [navigation]);
 
   const calculateStats = async () => {
     try {
-      const storedNotes = await AsyncStorage.getItem('notes');
+      console.log('=== STATISTICS SCREEN DEBUG ===');
+      const userId = user?.email || user?.id;
       
-      if (storedNotes) {
-        const notesArray = JSON.parse(storedNotes);
+      if (!userId) {
+        console.log('No user ID available for statistics');
+        setStats({
+          totalNotes: 0, favoriteNotes: 0, categories: 0,
+          avgWordsPerNote: 0, createdThisWeek: 0, createdThisMonth: 0, editedThisWeek: 0
+        });
+        setLoading(false);
+        return;
+      }
+      
+      console.log('Loading statistics for user:', userId);
+      const notesArray = await getLocalNotes(userId);
+      
+      if (notesArray && notesArray.length > 0) {
+        console.log('Found notes for statistics:', notesArray.length);
+        console.log('Notes data sample:', notesArray.slice(0, 2).map(n => ({
+          id: n.id,
+          title: n.title,
+          category: n.category,
+          isFavorite: n.isFavorite,
+          contentLength: n.content?.length || 0
+        })));
+        
         const now = new Date();
         const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -45,26 +78,30 @@ const StatisticsScreen = () => {
         
         // Calculate favorite notes
         const favoriteNotes = notesArray.filter(note => note.isFavorite).length;
+        console.log('Favorite notes count:', favoriteNotes);
         
         // Calculate categories
         const categories = {};
         notesArray.forEach(note => {
-          if (categories[note.category]) {
-            categories[note.category]++;
+          const category = note.category || 'Personal'; // Default to Personal if no category
+          if (categories[category]) {
+            categories[category]++;
           } else {
-            categories[note.category] = 1;
+            categories[category] = 1;
           }
         });
+        console.log('Categories breakdown:', categories);
         
         // Calculate word count
         let totalWords = 0;
         notesArray.forEach(note => {
-          const words = (note.content || '').trim().split(/\s+/);
+          const words = (note.content || '').trim().split(/\s+/).filter(word => word.length > 0);
           totalWords += words.length;
         });
         
         // Calculate average note length
         const averageLength = totalNotes > 0 ? Math.round(totalWords / totalNotes) : 0;
+        console.log('Total words:', totalWords, 'Average length:', averageLength);
         
         // Calculate notes created this week and month
         const createdThisWeek = notesArray.filter(note => {
@@ -84,7 +121,7 @@ const StatisticsScreen = () => {
           return noteDate >= oneWeekAgo;
         }).length;
         
-        setStats({
+        const finalStats = {
           totalNotes,
           favoriteNotes,
           categories,
@@ -93,7 +130,14 @@ const StatisticsScreen = () => {
           createdThisWeek,
           createdThisMonth,
           editedThisWeek
-        });
+        };
+        
+        console.log('Final statistics:', finalStats);
+        console.log('=== END STATISTICS SCREEN DEBUG ===');
+        setStats(finalStats);
+      } else {
+        console.log('No notes found in storage for statistics');
+        console.log('=== END STATISTICS SCREEN DEBUG ===');
       }
     } catch (error) {
       console.log('Error calculating stats:', error);

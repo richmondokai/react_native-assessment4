@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { useAuth } from '../../context/AuthContext';
 import { useDarkMode } from '../../hooks/useDarkMode';
 
 const ForgotPasswordScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  const { forgotPassword } = useAuth();
 
-  const handleResetPassword = () => {
+  const handleResetPassword = async () => {
     if (!email) {
       Alert.alert('Error', 'Please enter your email address');
       return;
@@ -15,20 +17,30 @@ const ForgotPasswordScreen = ({ navigation }) => {
 
     setIsLoading(true);
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      // Call the forgotPassword function from AuthContext
+      const result = await forgotPassword(email);
+      
+      if (result.success) {
+        Alert.alert(
+          'Success',
+          'If an account exists with this email, you will receive password reset instructions.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.navigate('Login')
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', result.error || 'Failed to send reset instructions. Please try again.');
+      }
+    } catch (error) {
+      console.log('Password reset error:', error);
+      Alert.alert('Error', 'Failed to send reset instructions. Please try again.');
+    } finally {
       setIsLoading(false);
-      Alert.alert(
-        'Success',
-        'If an account exists with this email, you will receive password reset instructions.',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.navigate('Login')
-          }
-        ]
-      );
-    }, 1500);
+    }
   };
 
   return (

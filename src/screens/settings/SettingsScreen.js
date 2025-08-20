@@ -11,6 +11,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../context/ThemeContext';
+import { NOTES_KEY } from '../../constants';
+import { useAuth } from '../../context/AuthContext';
+import { clearUserSpecificData } from '../../utils/debugStorage';
 
 const SettingsScreen = ({ navigation }) => {
   const [darkMode, setDarkMode] = useState(false);
@@ -18,6 +21,7 @@ const SettingsScreen = ({ navigation }) => {
   const [autoSave, setAutoSave] = useState(true);
   const [fontSize, setFontSize] = useState('medium');
   const { toggleTheme } = useTheme();
+  const { user } = useAuth();
   
   // Set navigation options
   React.useLayoutEffect(() => {
@@ -129,7 +133,17 @@ const SettingsScreen = ({ navigation }) => {
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: async () => {
           try {
-            await AsyncStorage.removeItem('notes');
+            console.log('=== CLEARING ALL USER DATA ===');
+            const userId = user?.email || user?.id;
+            
+            if (userId) {
+              console.log('Clearing user-specific data for:', userId);
+              await clearUserSpecificData();
+            } else {
+              console.log('Clearing generic data');
+              await AsyncStorage.removeItem(NOTES_KEY);
+            }
+            console.log('All user data cleared successfully');
             Alert.alert('Success', 'All notes have been deleted.');
           } catch (error) {
             console.log('Error clearing data:', error);

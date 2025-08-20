@@ -1,13 +1,73 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../context/AuthContext';
 import { useDarkMode } from '../../hooks/useDarkMode';
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [isEmailValid, setIsEmailValid] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+
+  const { login } = useAuth();
+
+  // Email validation function
+  const validateEmail = (emailValue) => {
+    // Basic email regex pattern that requires @xxx.com format
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    
+    if (!emailValue) {
+      setEmailError('');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    if (!emailValue.includes('@')) {
+      setEmailError('Email must contain "@" symbol');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    if (!emailValue.includes('.')) {
+      setEmailError('Email must contain domain extension (e.g., .com)');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    if (!emailRegex.test(emailValue)) {
+      setEmailError('Please enter a valid email format (e.g., user@example.com)');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    // Check for common domain extensions
+    const domainPart = emailValue.split('@')[1];
+    if (!domainPart || !domainPart.includes('.')) {
+      setEmailError('Email must have proper domain (e.g., @gmail.com)');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    setEmailError('');
+    setIsEmailValid(true);
+    return true;
+  };
+
+  // Handle email input change with real-time validation
+  const handleEmailChange = (value) => {
+    setEmail(value);
+    // Only validate if user has typed something
+    if (value.length > 0) {
+      validateEmail(value);
+    } else {
+      setEmailError('');
+      setIsEmailValid(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -15,15 +75,22 @@ const LoginScreen = ({ navigation }) => {
       return;
     }
 
+    // Validate email format before attempting login
+    if (!validateEmail(email)) {
+      Alert.alert('Invalid Email', emailError || 'Please enter a valid email address');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      // In a real app, you would validate credentials with an API
-      // For this demo, we'll just simulate a successful login
-      await AsyncStorage.setItem('userToken', 'demo-token');
+      const result = await login(email, password);
       
-      // Just set the token and let AppNavigator handle the navigation
-      // The AppNavigator will detect the token and show the main app
+      if (!result.success) {
+        Alert.alert('Login Failed', result.error || 'Invalid email or password');
+      }
+      // No need to navigate - the AuthContext will update isAuthenticated
+      // and AppNavigator will automatically show the main app
     } catch (error) {
       console.log('Login error:', error);
       Alert.alert('Error', 'Failed to login. Please try again.');
@@ -40,27 +107,62 @@ const LoginScreen = ({ navigation }) => {
       <View style={styles.form}>
         <View style={styles.inputContainer}>
           <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>Email</Text>
-          <TextInput
-            style={[styles.input, isDarkMode && darkModeStyles.input]}
-            placeholder="Enter your email"
-            placeholderTextColor={isDarkMode ? '#888' : '#999'}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={email}
-            onChangeText={setEmail}
-          />
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={[
+                styles.input, 
+                isDarkMode && darkModeStyles.input,
+                emailError && styles.inputError,
+                isEmailValid && styles.inputValid
+              ]}
+              placeholder="Enter your email"
+              placeholderTextColor={isDarkMode ? '#888' : '#999'}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={handleEmailChange}
+            />
+            {email.length > 0 && (
+              <View style={styles.validationIcon}>
+                {isEmailValid ? (
+                  <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                ) : emailError ? (
+                  <Ionicons name="close-circle" size={20} color="#F44336" />
+                ) : null}
+              </View>
+            )}
+          </View>
+          {emailError ? (
+            <Text style={styles.errorText}>{emailError}</Text>
+          ) : null}
         </View>
 
         <View style={styles.inputContainer}>
           <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>Password</Text>
-          <TextInput
-            style={[styles.input, isDarkMode && darkModeStyles.input]}
-            placeholder="Enter your password"
-            placeholderTextColor={isDarkMode ? '#888' : '#999'}
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
+          <View style={styles.passwordInputContainer}>
+            <TextInput
+              style={[
+                styles.input,
+                styles.passwordInput,
+                isDarkMode && darkModeStyles.input
+              ]}
+              placeholder="Enter your password"
+              placeholderTextColor={isDarkMode ? '#888' : '#999'}
+              secureTextEntry={!showPassword}
+              value={password}
+              onChangeText={setPassword}
+            />
+            <TouchableOpacity 
+              style={styles.eyeButton} 
+              onPress={() => setShowPassword(!showPassword)}
+            >
+              <Ionicons 
+                name={showPassword ? 'eye' : 'eye-off'} 
+                size={20} 
+                color={isDarkMode ? '#888' : '#666'} 
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <TouchableOpacity 
@@ -126,13 +228,48 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: '#333',
   },
+  inputWrapper: {
+    position: 'relative',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
+    paddingRight: 45, // Make room for validation icon
     fontSize: 16,
     backgroundColor: '#f9f9f9',
+  },
+  inputError: {
+    borderColor: '#F44336',
+    backgroundColor: '#ffeaea',
+  },
+  inputValid: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#f0f8f0',
+  },
+  passwordInputContainer: {
+    position: 'relative',
+  },
+  passwordInput: {
+    paddingRight: 50, // Make room for eye icon
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    padding: 5,
+  },
+  validationIcon: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
   },
   forgotPassword: {
     alignSelf: 'flex-end',

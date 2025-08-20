@@ -37,8 +37,23 @@ const TabNavigator = () => {
         tabBarStyle: {
           backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
           borderTopColor: isDarkMode ? '#333' : '#e0e0e0',
+          borderTopWidth: 1,
+          elevation: 8,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: isDarkMode ? 0.3 : 0.1,
+          shadowRadius: 4,
+          paddingBottom: 5,
+          paddingTop: 5,
+          height: 60,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '500',
+          marginBottom: 3,
         },
         headerShown: false,
+        tabBarHideOnKeyboard: true, // Hide tab bar when keyboard is open
       })}
     >
       <Tab.Screen 

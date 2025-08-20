@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../../context/AuthContext';
 import { useDarkMode } from '../../hooks/useDarkMode';
 
 const SignupScreen = ({ navigation }) => {
@@ -9,7 +10,126 @@ const SignupScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [isEmailValid, setIsEmailValid] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
+  const [isPasswordMatch, setIsPasswordMatch] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  const { register } = useAuth();
+
+  // Email validation function (same as LoginScreen)
+  const validateEmail = (emailValue) => {
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    
+    if (!emailValue) {
+      setEmailError('');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    if (!emailValue.includes('@')) {
+      setEmailError('Email must contain "@" symbol');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    if (!emailValue.includes('.')) {
+      setEmailError('Email must contain domain extension (e.g., .com)');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    if (!emailRegex.test(emailValue)) {
+      setEmailError('Please enter a valid email format (e.g., user@example.com)');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    const domainPart = emailValue.split('@')[1];
+    if (!domainPart || !domainPart.includes('.')) {
+      setEmailError('Email must have proper domain (e.g., @gmail.com)');
+      setIsEmailValid(false);
+      return false;
+    }
+    
+    setEmailError('');
+    setIsEmailValid(true);
+    return true;
+  };
+
+  const handleEmailChange = (value) => {
+    setEmail(value);
+    if (value.length > 0) {
+      validateEmail(value);
+    } else {
+      setEmailError('');
+      setIsEmailValid(false);
+    }
+  };
+
+  // Password validation function
+  const validatePassword = (passwordValue) => {
+    if (!passwordValue) {
+      setPasswordError('');
+      return false;
+    }
+    
+    if (passwordValue.length < 8) {
+      setPasswordError('Password must be at least 8 characters long');
+      return false;
+    }
+    
+    setPasswordError('');
+    return true;
+  };
+
+  // Password matching validation
+  const validatePasswordMatch = (confirmValue, originalPassword) => {
+    if (!confirmValue) {
+      setConfirmPasswordError('');
+      setIsPasswordMatch(false);
+      return false;
+    }
+    
+    if (confirmValue !== originalPassword) {
+      setConfirmPasswordError('Passwords do not match');
+      setIsPasswordMatch(false);
+      return false;
+    }
+    
+    setConfirmPasswordError('');
+    setIsPasswordMatch(true);
+    return true;
+  };
+
+  // Handle password input change
+  const handlePasswordChange = (value) => {
+    setPassword(value);
+    if (value.length > 0) {
+      validatePassword(value);
+    } else {
+      setPasswordError('');
+    }
+    
+    // Re-validate confirm password if it has been entered
+    if (confirmPassword.length > 0) {
+      validatePasswordMatch(confirmPassword, value);
+    }
+  };
+
+  // Handle confirm password input change
+  const handleConfirmPasswordChange = (value) => {
+    setConfirmPassword(value);
+    if (value.length > 0) {
+      validatePasswordMatch(value, password);
+    } else {
+      setConfirmPasswordError('');
+      setIsPasswordMatch(false);
+    }
+  };
 
   const handleSignup = async () => {
     if (!name || !email || !password || !confirmPassword) {
@@ -17,20 +137,45 @@ const SignupScreen = ({ navigation }) => {
       return;
     }
 
-    if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+    // Validate email format before attempting signup
+    if (!validateEmail(email)) {
+      Alert.alert('Invalid Email', emailError || 'Please enter a valid email address');
+      return;
+    }
+
+    // Validate password before attempting signup
+    if (!validatePassword(password)) {
+      Alert.alert('Invalid Password', passwordError || 'Password must be at least 8 characters long');
+      return;
+    }
+
+    // Validate password match before attempting signup
+    if (!validatePasswordMatch(confirmPassword, password)) {
+      Alert.alert('Password Mismatch', confirmPasswordError || 'Passwords do not match');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      // In a real app, you would create an account with an API
-      // For this demo, we'll just simulate a successful signup
-      await AsyncStorage.setItem('userToken', 'demo-token');
+      // Call the register function from AuthContext
+      const result = await register(name, email, password);
       
-      // Just set the token and let AppNavigator handle the navigation
-      // The AppNavigator will detect the token and show the main app
+      if (result.success) {
+        // Show success message and navigate back to login
+        Alert.alert(
+          'Account Created Successfully!', 
+          'Your account has been created. Please log in with your credentials.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.navigate('Login')
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Registration Failed', result.error || 'Failed to create account');
+      }
     } catch (error) {
       console.log('Signup error:', error);
       Alert.alert('Error', 'Failed to create account. Please try again.');
@@ -46,7 +191,9 @@ const SignupScreen = ({ navigation }) => {
 
       <View style={styles.form}>
         <View style={styles.inputContainer}>
-          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>Full Name</Text>
+          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>
+            Full Name <Text style={styles.required}>*</Text>
+          </Text>
           <TextInput
             style={[styles.input, isDarkMode && darkModeStyles.input]}
             placeholder="Enter your full name"
@@ -57,40 +204,118 @@ const SignupScreen = ({ navigation }) => {
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>Email</Text>
-          <TextInput
-            style={[styles.input, isDarkMode && darkModeStyles.input]}
-            placeholder="Enter your email"
-            placeholderTextColor={isDarkMode ? '#888' : '#999'}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            value={email}
-            onChangeText={setEmail}
-          />
+          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>
+            Email <Text style={styles.required}>*</Text>
+          </Text>
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={[
+                styles.input, 
+                styles.emailInput,
+                isDarkMode && darkModeStyles.input,
+                emailError && styles.inputError,
+                isEmailValid && styles.inputValid
+              ]}
+              placeholder="Enter your email"
+              placeholderTextColor={isDarkMode ? '#888' : '#999'}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              value={email}
+              onChangeText={handleEmailChange}
+            />
+            {email.length > 0 && (
+              <View style={styles.validationIcon}>
+                {isEmailValid ? (
+                  <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+                ) : emailError ? (
+                  <Ionicons name="close-circle" size={20} color="#F44336" />
+                ) : null}
+              </View>
+            )}
+          </View>
+          {emailError ? (
+            <Text style={styles.errorText}>{emailError}</Text>
+          ) : null}
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>Password</Text>
-          <TextInput
-            style={[styles.input, isDarkMode && darkModeStyles.input]}
-            placeholder="Create a password"
-            placeholderTextColor={isDarkMode ? '#888' : '#999'}
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
+          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>
+            Password <Text style={styles.required}>*</Text>
+          </Text>
+          <View style={styles.passwordInputContainer}>
+            <TextInput
+              style={[
+                styles.input, 
+                styles.passwordInput,
+                isDarkMode && darkModeStyles.input,
+                passwordError && styles.inputError,
+                password.length >= 8 && !passwordError && styles.inputValid
+              ]}
+              placeholder="Create password"
+              placeholderTextColor={isDarkMode ? '#888' : '#999'}
+              secureTextEntry={!showPassword}
+              value={password}
+              onChangeText={handlePasswordChange}
+            />
+            <TouchableOpacity
+              style={styles.eyeButton}
+              onPress={() => setShowPassword(!showPassword)}
+            >
+              <Ionicons
+                name={showPassword ? 'eye' : 'eye-off'}
+                size={20}
+                color={isDarkMode ? '#888' : '#666'}
+              />
+            </TouchableOpacity>
+            {passwordError && (
+              <View style={styles.passwordValidationIcon}>
+                <Ionicons name="close-circle" size={20} color="#F44336" />
+              </View>
+            )}
+          </View>
+          {passwordError ? (
+            <Text style={styles.errorText}>{passwordError}</Text>
+          ) : null}
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>Confirm Password</Text>
-          <TextInput
-            style={[styles.input, isDarkMode && darkModeStyles.input]}
-            placeholder="Confirm your password"
-            placeholderTextColor={isDarkMode ? '#888' : '#999'}
-            secureTextEntry
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-          />
+          <Text style={[styles.label, isDarkMode && { color: darkModeStyles.text.color }]}>
+            Confirm Password <Text style={styles.required}>*</Text>
+          </Text>
+          <View style={styles.passwordInputContainer}>
+            <TextInput
+              style={[
+                styles.input, 
+                styles.passwordInput,
+                isDarkMode && darkModeStyles.input,
+                confirmPasswordError && styles.inputError,
+                isPasswordMatch && styles.inputValid
+              ]}
+              placeholder="Confirm your password"
+              placeholderTextColor={isDarkMode ? '#888' : '#999'}
+              secureTextEntry={!showConfirmPassword}
+              value={confirmPassword}
+              onChangeText={handleConfirmPasswordChange}
+            />
+            <TouchableOpacity
+              style={styles.eyeButton}
+              onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+            >
+              <Ionicons
+                name={showConfirmPassword ? 'eye' : 'eye-off'}
+                size={20}
+                color={isDarkMode ? '#888' : '#666'}
+              />
+            </TouchableOpacity>
+            {confirmPasswordError && (
+              <View style={styles.passwordValidationIcon}>
+                <Ionicons name="close-circle" size={20} color="#F44336" />
+              </View>
+            )}
+          </View>
+          {confirmPasswordError ? (
+            <Text style={styles.errorText}>{confirmPasswordError}</Text>
+          ) : null}
         </View>
 
         <TouchableOpacity 
@@ -149,13 +374,61 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: '#333',
   },
+  required: {
+    color: '#F44336',
+    fontWeight: 'bold',
+  },
+  inputWrapper: {
+    position: 'relative',
+  },
+  emailInput: {
+    paddingLeft: 16,
+    paddingRight: 45,
+  },
+  passwordInputContainer: {
+    position: 'relative',
+  },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    padding: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16, // Default balanced padding
     fontSize: 16,
     backgroundColor: '#f9f9f9',
+  },
+  passwordInput: {
+    paddingRight: 80, // Make room for both eye icon and validation icon
+  },
+  inputError: {
+    borderColor: '#F44336',
+    backgroundColor: '#ffeaea',
+  },
+  inputValid: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#f0f8f0',
+  },
+  validationIcon: {
+    position: 'absolute',
+    right: 12, // Positioned at the right edge for email field
+    top: 12,
+  },
+  passwordValidationIcon: {
+    position: 'absolute',
+    right: 45, // Move left to make room for eye icon in password fields
+    top: 12,
+  },
+  eyeButton: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    padding: 5,
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
   },
   button: {
     backgroundColor: '#007AFF',

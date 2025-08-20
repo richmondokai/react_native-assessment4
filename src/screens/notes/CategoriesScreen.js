@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -8,8 +8,10 @@ import {
   ActivityIndicator 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDarkMode } from '../../hooks/useDarkMode';
+import { useAuth } from '../../context/AuthContext';
+import { useNotes } from '../../context/NotesContext';
+import { useFocusEffect } from '@react-navigation/native';
 
 const CategoriesScreen = ({ navigation }) => {
   const [categories, setCategories] = useState([]);
@@ -17,6 +19,24 @@ const CategoriesScreen = ({ navigation }) => {
   const [categoryNotes, setCategoryNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  const { user } = useAuth();
+  const { notes } = useNotes();
+  
+  // Track last refresh time to prevent excessive refreshing
+  const lastRefreshTimeRef = useRef(0);
+  const DEBOUNCE_TIME = 2000; // 2 seconds
+  
+  // Safety timeout to prevent stuck loading state
+  useEffect(() => {
+    const safetyTimeout = setTimeout(() => {
+      if (loading) {
+        console.log('Safety timeout triggered - forcing loading state off');
+        setLoading(false);
+      }
+    }, 5000); // 5 second safety timeout
+    
+    return () => clearTimeout(safetyTimeout);
+  }, [loading]);
 
   const defaultCategories = [
     { name: 'Personal', color: '#2196F3', icon: 'person-outline' },
@@ -25,19 +45,199 @@ const CategoriesScreen = ({ navigation }) => {
     { name: 'To-Do', color: '#9C27B0', icon: 'checkbox-outline' }
   ];
 
-  useEffect(() => {
-    loadCategories();
-    
-    // Set up a listener for when we return to this screen
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadCategories();
-      if (selectedCategory) {
-        loadCategoryNotes(selectedCategory);
-      }
-    });
+  // Seamless auto-refresh when screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('=== CATEGORIES SCREEN FOCUS EFFECT ===');
+      console.log('CategoriesScreen focused - performing seamless refresh');
+      
+      let isActive = true; // Cleanup flag
+      
+      const performSeamlessRefresh = async () => {
+        if (!isActive) return; // Prevent state updates if component unmounted
+        
+        const now = Date.now();
+        const timeSinceLastRefresh = now - lastRefreshTimeRef.current;
+        
+        // Only refresh if we haven't refreshed recently to avoid interfering with real-time updates
+        if (timeSinceLastRefresh > DEBOUNCE_TIME) {
+          lastRefreshTimeRef.current = now;
+          console.log('Background refreshing categories data');
+          
+          // Load categories from current notes state (seamless - no loading indicator)
+          if (isActive) {
+            loadCategories(true);
+            if (selectedCategory) {
+              loadCategoryNotes(selectedCategory);
+            }
+          }
+        } else {
+          console.log(`Skipping refresh - last refresh was ${timeSinceLastRefresh}ms ago`);
+          // Even if we skip the refresh, ensure categories are up to date
+          if (isActive && user && Array.isArray(notes)) {
+            // Update categories
+            if (notes.length > 0) {
+              const categoryCounts = {};
+              notes.forEach(note => {
+                if (note) {
+                  const category = note.category || 'Personal';
+                  if (categoryCounts[category]) {
+                    categoryCounts[category]++;
+                  } else {
+                    categoryCounts[category] = 1;
+                  }
+                }
+              });
+              
+              const categoryList = defaultCategories.map(cat => ({
+                ...cat,
+                count: categoryCounts[cat.name] || 0
+              }));
+              
+              setCategories(categoryList);
+              console.log('Categories updated from focus effect (skipped refresh)');
+            }
+            
+            // Update category notes if a category is selected
+            if (selectedCategory) {
+              const filteredNotes = notes.filter(note => note && (note.category || 'Personal') === selectedCategory);
+              const sortedCategoryNotes = filteredNotes.sort((a, b) => {
+                const timeA = new Date(a.updatedAt || a.date || 0).getTime();
+                const timeB = new Date(b.updatedAt || b.date || 0).getTime();
+                return timeB - timeA;
+              });
+              setCategoryNotes(sortedCategoryNotes);
+              console.log('Category notes updated from focus effect (skipped refresh):', sortedCategoryNotes.length);
+            }
+          }
+        }
+      };
+      
+      performSeamlessRefresh();
+      
+      // Cleanup function
+      return () => {
+        isActive = false;
+      };
+    }, [loadCategories, loadCategoryNotes, selectedCategory, notes, user]) // Depend on notes and user to ensure we have latest data
+  );
 
-    return unsubscribe;
-  }, [navigation]);
+  // Reload categories whenever notes change (for real-time updates)
+  useEffect(() => {
+    console.log('=== CATEGORIES SCREEN NOTES CHANGE EFFECT ===');
+    console.log('CategoriesScreen: Notes or user changed, reloading categories');
+    console.log('Notes count:', notes?.length || 0);
+    console.log('User:', user?.email || user?.id);
+    console.log('Notes array:', notes?.map(n => ({ id: n.id, title: n.title, category: n.category })));
+    
+    // Directly update categories when notes change
+    if (user && Array.isArray(notes)) {
+      if (notes.length > 0) {
+        // Get unique categories and count notes in each with null safety
+        const categoryCounts = {};
+        notes.forEach(note => {
+          if (note) {
+            const category = note.category || 'Personal'; // Default to Personal if no category
+            if (categoryCounts[category]) {
+              categoryCounts[category]++;
+            } else {
+              categoryCounts[category] = 1;
+            }
+          }
+        });
+        
+        console.log('Category counts:', categoryCounts);
+        
+        // Map to our category format
+        const categoryList = defaultCategories.map(cat => ({
+          ...cat,
+          count: categoryCounts[cat.name] || 0
+        }));
+        
+        console.log('Final category list:', categoryList);
+        
+        // Only update if the categories actually changed
+        const currentCategoriesString = JSON.stringify(categories);
+        const newCategoriesString = JSON.stringify(categoryList);
+        
+        if (currentCategoriesString !== newCategoriesString) {
+          console.log('Categories changed - updating state');
+          setCategories(categoryList);
+          console.log('Categories updated directly from notes change');
+        } else {
+          console.log('Categories unchanged - skipping update');
+        }
+      } else {
+        // No notes yet, show empty categories
+        const emptyCategories = defaultCategories.map(cat => ({
+          ...cat,
+          count: 0
+        }));
+        
+        const currentCategoriesString = JSON.stringify(categories);
+        const newCategoriesString = JSON.stringify(emptyCategories);
+        
+        if (currentCategoriesString !== newCategoriesString) {
+          console.log('Categories changed to empty - updating state');
+          setCategories(emptyCategories);
+        }
+      }
+    }
+    console.log('=== END CATEGORIES SCREEN NOTES CHANGE EFFECT ===');
+  }, [notes, user, categories]); // Depend on notes, user, and categories for change detection
+
+  // Additional effect to force refresh when categories change
+  useEffect(() => {
+    console.log('=== CATEGORIES SCREEN CATEGORIES CHANGE EFFECT ===');
+    console.log('Categories state changed:', categories?.length || 0);
+    console.log('Current categories:', categories?.map(cat => ({ name: cat.name, count: cat.count })));
+    console.log('=== END CATEGORIES SCREEN CATEGORIES CHANGE EFFECT ===');
+  }, [categories]);
+
+  // Additional effect to force refresh when category notes change
+  useEffect(() => {
+    console.log('=== CATEGORIES SCREEN CATEGORY NOTES CHANGE EFFECT ===');
+    console.log('Category notes state changed:', categoryNotes?.length || 0);
+    console.log('Current category notes:', categoryNotes?.map(n => ({ id: n.id, title: n.title, category: n.category })));
+    console.log('=== END CATEGORIES SCREEN CATEGORY NOTES CHANGE EFFECT ===');
+  }, [categoryNotes]);
+
+  // Reload category notes when selectedCategory changes or notes change
+  useEffect(() => {
+    console.log('=== CATEGORIES SCREEN CATEGORY NOTES EFFECT ===');
+    console.log('Selected category or notes changed');
+    console.log('Selected category:', selectedCategory);
+    console.log('Notes count:', notes?.length || 0);
+    
+    if (selectedCategory && user && Array.isArray(notes)) {
+      // Directly update category notes when notes change
+      const filteredNotes = notes.filter(note => note && (note.category || 'Personal') === selectedCategory);
+      console.log('Filtered notes for', selectedCategory + ':', filteredNotes.length);
+      
+      // Sort by most recently updated
+      const sortedCategoryNotes = filteredNotes.sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.date || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.date || 0).getTime();
+        return timeB - timeA;
+      });
+      
+      // Only update if the category notes actually changed
+      const currentNotesString = JSON.stringify(categoryNotes);
+      const newNotesString = JSON.stringify(sortedCategoryNotes);
+      
+      if (currentNotesString !== newNotesString) {
+        console.log('Category notes changed - updating state');
+        setCategoryNotes(sortedCategoryNotes);
+        console.log('Category notes updated directly from notes change:', sortedCategoryNotes.length);
+      } else {
+        console.log('Category notes unchanged - skipping update');
+      }
+    } else if (selectedCategory) {
+      // If we have a selected category but no notes/user, clear the notes
+      setCategoryNotes([]);
+    }
+    console.log('=== END CATEGORIES SCREEN CATEGORY NOTES EFFECT ===');
+  }, [selectedCategory, notes, user, categoryNotes]); // Depend on notes, user, and categoryNotes for change detection
   
   // Set navigation options
   React.useLayoutEffect(() => {
@@ -46,21 +246,46 @@ const CategoriesScreen = ({ navigation }) => {
     });
   }, [navigation]);
 
-  const loadCategories = async () => {
+  const loadCategories = React.useCallback((isSeamless = false) => {
     try {
-      const storedNotes = await AsyncStorage.getItem('notes');
-      if (storedNotes) {
-        const notesArray = JSON.parse(storedNotes);
+      console.log('=== LOAD CATEGORIES FUNCTION CALLED ===');
+      console.log('loadCategories called with isSeamless:', isSeamless);
+      console.log('=== CATEGORIES SCREEN DEBUG ===');
+      console.log('Is seamless refresh:', isSeamless);
+      
+      if (!user) {
+        console.log('No user available for categories');
+        setCategories(defaultCategories.map(cat => ({ ...cat, count: 0 })));
+        console.log('Setting loading to false (no user)');
+        setLoading(false); // Always set loading to false
+        return;
+      }
+      
+      console.log('Loading categories from notes context:', notes?.length || 0);
+      const notesArray = Array.isArray(notes) ? notes : [];
+      
+      if (notesArray.length > 0) {
+        console.log('Found notes in storage:', notesArray.length);
+        console.log('Notes data:', notesArray.map(n => ({
+          id: n.id,
+          title: n.title,
+          category: n.category
+        })));
         
-        // Get unique categories and count notes in each
+        // Get unique categories and count notes in each with null safety
         const categoryCounts = {};
         notesArray.forEach(note => {
-          if (categoryCounts[note.category]) {
-            categoryCounts[note.category]++;
-          } else {
-            categoryCounts[note.category] = 1;
+          if (note) {
+            const category = note.category || 'Personal'; // Default to Personal if no category
+            if (categoryCounts[category]) {
+              categoryCounts[category]++;
+            } else {
+              categoryCounts[category] = 1;
+            }
           }
         });
+        
+        console.log('Category counts:', categoryCounts);
         
         // Map to our category format
         const categoryList = defaultCategories.map(cat => ({
@@ -68,38 +293,83 @@ const CategoriesScreen = ({ navigation }) => {
           count: categoryCounts[cat.name] || 0
         }));
         
+        console.log('Final category list:', categoryList);
         setCategories(categoryList);
       } else {
+        console.log('No notes found in storage');
         // No notes yet, show empty categories
         setCategories(defaultCategories.map(cat => ({
           ...cat,
           count: 0
         })));
       }
+      console.log('=== END CATEGORIES SCREEN DEBUG ===');
     } catch (error) {
-      console.log('Error loading categories:', error);
+      console.error('Error loading categories:', error);
+      console.error('Error stack:', error.stack);
+      
+      // Set default categories on error
+      setCategories(defaultCategories.map(cat => ({
+        ...cat,
+        count: 0
+      })));
     } finally {
-      setLoading(false);
+      console.log('Setting loading to false');
+      setLoading(false); // Always set loading to false
     }
-  };
+  }, [notes, user]); // Stable function with proper dependencies
 
-  const loadCategoryNotes = async (category) => {
+  const loadCategoryNotes = React.useCallback((category) => {
     setLoading(true);
     try {
-      const storedNotes = await AsyncStorage.getItem('notes');
-      if (storedNotes) {
-        const notesArray = JSON.parse(storedNotes);
-        const filteredNotes = notesArray.filter(note => note.category === category);
-        setCategoryNotes(filteredNotes);
+      console.log('=== LOAD CATEGORY NOTES FUNCTION CALLED ===');
+      console.log('loadCategoryNotes called for category:', category);
+      console.log('=== LOADING CATEGORY NOTES ===');
+      console.log('Loading notes for category:', category);
+      
+      if (!user) {
+        console.log('No user available for category notes');
+        setCategoryNotes([]);
+        setLoading(false);
+        return;
+      }
+      
+      const notesArray = Array.isArray(notes) ? notes : [];
+      console.log('Notes from context for category:', notesArray.length);
+      
+      if (notesArray.length > 0) {
+        console.log('All notes:', notesArray.length);
+        const filteredNotes = notesArray.filter(note => note && (note.category || 'Personal') === category);
+        console.log('Filtered notes for', category + ':', filteredNotes.length);
+        console.log('Filtered notes:', filteredNotes.map(n => ({
+          id: n.id,
+          title: n.title,
+          category: n.category
+        })));
+        
+        // Sort by most recently updated
+        const sortedCategoryNotes = filteredNotes.sort((a, b) => {
+          const timeA = new Date(a.updatedAt || a.date || 0).getTime();
+          const timeB = new Date(b.updatedAt || b.date || 0).getTime();
+          return timeB - timeA;
+        });
+        
+        setCategoryNotes(sortedCategoryNotes);
       } else {
+        console.log('No notes in storage');
         setCategoryNotes([]);
       }
+      console.log('=== END LOADING CATEGORY NOTES ===');
     } catch (error) {
-      console.log('Error loading category notes:', error);
+      console.error('Error loading category notes:', error);
+      console.error('Error stack:', error.stack);
+      
+      // Set empty array on error
+      setCategoryNotes([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [notes, user]); // Stable function with proper dependencies
 
   const handleCategoryPress = (category) => {
     if (selectedCategory === category.name) {
@@ -177,6 +447,7 @@ const CategoriesScreen = ({ navigation }) => {
   };
 
   if (loading && !selectedCategory) {
+    console.log('CategoriesScreen: Showing loading state');
     return (
       <View style={[styles.loadingContainer, darkModeStyles.container]}>
         <ActivityIndicator size="large" color={isDarkMode ? "#4a9eff" : "#007AFF"} />
@@ -184,8 +455,20 @@ const CategoriesScreen = ({ navigation }) => {
     );
   }
 
+  console.log('=== CATEGORIES SCREEN RENDER ===');
+  console.log('Rendering categories screen');
+  console.log('categories state:', categories);
+  console.log('categories length:', categories?.length);
+  console.log('selectedCategory:', selectedCategory);
+  console.log('categoryNotes length:', categoryNotes?.length);
+  console.log('notes from context:', notes?.length || 0);
+  console.log('notes with categories:', notes?.map(n => ({ id: n.id, title: n.title, category: n.category })));
+  console.log('=== END RENDER DEBUG ===');
+
   return (
     <View style={[styles.container, darkModeStyles.container]}>
+
+      
       <FlatList
         data={categories}
         renderItem={renderCategoryItem}
@@ -344,6 +627,7 @@ const styles = StyleSheet.create({
     color: '#999',
     textAlign: 'center',
   },
+
 });
 
 export default CategoriesScreen;

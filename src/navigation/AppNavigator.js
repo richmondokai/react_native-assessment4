@@ -1,36 +1,23 @@
 import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '../context/AuthContext';
+import { useDarkMode } from '../hooks/useDarkMode';
 
 import AuthNavigator from './AuthNavigator';
 import DrawerNavigator from './DrawerNavigator';
-import { ThemeProvider, useTheme } from '../context/ThemeContext';
 
 const AppContent = ({ initialAuthenticated = false }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(initialAuthenticated);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [isLoading, setIsLoading] = useState(!initialAuthenticated);
-  const { theme } = useTheme();
+  const { isDarkMode } = useDarkMode();
 
   useEffect(() => {
-    // Check if user is logged in
-    const checkUserSession = async () => {
-      try {
-        const userToken = await AsyncStorage.getItem('userToken');
-        setIsAuthenticated(userToken !== null);
-      } catch (error) {
-        console.log('Error checking user session:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkUserSession();
-
-    // Set up a listener for when AsyncStorage changes
-    const interval = setInterval(checkUserSession, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    // Set loading to false once auth is loaded
+    if (!authLoading) {
+      setIsLoading(false);
+    }
+  }, [authLoading]);
 
   if (isLoading) {
     // You could return a loading screen here
@@ -39,7 +26,7 @@ const AppContent = ({ initialAuthenticated = false }) => {
 
   return (
     <NavigationContainer>
-      <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style={isDarkMode ? 'light' : 'dark'} />
       {isAuthenticated ? <DrawerNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );

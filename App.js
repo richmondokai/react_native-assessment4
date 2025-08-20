@@ -6,6 +6,10 @@ import * as SplashScreen from 'expo-splash-screen';
 import AppNavigator from './src/navigation/AppNavigator';
 import CustomSplashScreen from './src/screens/SplashScreen';
 import { ThemeProvider } from './src/context/ThemeContext';
+import { AuthProvider } from './src/context/AuthContext';
+import { NetworkProvider } from './src/context/NetworkContext';
+import { NotesProvider } from './src/context/NotesContext';
+import NetworkStatusBar from './src/components/NetworkStatusBar';
 import { initializeSettings } from './src/utils/initializeSettings';
 
 // Prevent the splash screen from auto-hiding
@@ -72,7 +76,16 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AppNavigator initialAuthenticated={isAuthenticated} />
+        <NetworkProvider>
+          <AuthProvider>
+            <NotesProvider>
+              <View style={{ flex: 1 }}>
+                <AppNavigator initialAuthenticated={isAuthenticated} />
+                <NetworkStatusBar />
+              </View>
+            </NotesProvider>
+          </AuthProvider>
+        </NetworkProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

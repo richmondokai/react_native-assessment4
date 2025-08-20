@@ -12,10 +12,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useDarkMode } from '../../hooks/useDarkMode';
 
-const HelpScreen = () => {
+const HelpScreen = ({ navigation }) => {
   const [expandedSection, setExpandedSection] = useState(null);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
+  
+  // Set navigation options
+  React.useLayoutEffect(() => {
+    navigation.setOptions({
+      headerShown: true
+    });
+  }, [navigation]);
 
   const toggleSection = (section) => {
     if (expandedSection === section) {

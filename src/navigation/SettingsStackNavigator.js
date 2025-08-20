@@ -1,8 +1,8 @@
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
-import { useColorScheme } from 'react-native';
 
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import ChangePasswordScreen from '../screens/settings/ChangePasswordScreen';
 import { useDarkMode } from '../hooks/useDarkMode';
 
 const Stack = createStackNavigator();
@@ -27,6 +27,11 @@ const SettingsStackNavigator = () => {
         name="SettingsList" 
         component={SettingsScreen} 
         options={{ title: 'Settings' }}
+      />
+      <Stack.Screen 
+        name="ChangePassword" 
+        component={ChangePasswordScreen} 
+        options={{ title: 'Change Password' }}
       />
     </Stack.Navigator>
   );

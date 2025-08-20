@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -6,62 +6,115 @@ import {
   TouchableOpacity, 
   StyleSheet, 
   TextInput,
-  ActivityIndicator 
+  ActivityIndicator,
+  RefreshControl
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { useNotes } from '../../context/NotesContext';
+import { useNetwork } from '../../context/NetworkContext';
 import { useDarkMode } from '../../hooks/useDarkMode';
+import { useFocusEffect } from '@react-navigation/native';
+import { NOTES_KEY } from '../../constants';
 
 const NotesListScreen = ({ navigation }) => {
-  const [notes, setNotes] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { isDarkMode, styles: darkModeStyles } = useDarkMode();
-
-  useEffect(() => {
-    loadNotes();
-    
-    // Set up a listener for when we return to this screen
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadNotes();
-    });
-
-    return unsubscribe;
-  }, [navigation]);
-
-  const loadNotes = async () => {
-    try {
-      const storedNotes = await AsyncStorage.getItem('notes');
-      if (storedNotes) {
-        setNotes(JSON.parse(storedNotes));
-      } else {
-        // Sample notes for first-time users
-        const sampleNotes = [
-          {
-            id: '1',
-            title: 'Welcome to Notes App',
-            content: 'This is a sample note to help you get started. You can edit or delete this note.',
-            date: new Date().toISOString(),
-            isFavorite: false,
-            category: 'Personal'
-          },
-          {
-            id: '2',
-            title: 'How to use this app',
-            content: 'Tap the + button to create a new note. Tap on a note to view or edit it.',
-            date: new Date().toISOString(),
-            isFavorite: true,
-            category: 'Work'
+  const { notes, isLoading: loading, refreshNotes } = useNotes();
+  const { isConnected } = useNetwork();
+  
+  // Use a ref to track last refresh time to prevent excessive refreshing
+  const lastRefreshTimeRef = useRef(0);
+  // Debounce time in milliseconds (2 seconds)
+  const DEBOUNCE_TIME = 2000;
+  
+  // Refresh notes when screen is focused, but with debounce to prevent excessive refreshing
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('NotesListScreen focused');
+      
+      // Use a flag to prevent multiple refreshes
+      let isMounted = true;
+      
+          // Only refresh on first focus or when returning from edit
+      // We'll use a session storage flag to track if we're coming from an edit
+      const checkAndRefresh = async () => {
+        try {
+          const editCompleted = await AsyncStorage.getItem('EDIT_COMPLETED');
+          const isFirstLoad = lastRefreshTimeRef.current === 0;
+          
+          if (isFirstLoad || editCompleted === 'true') {
+            console.log('Refreshing notes - first load or edit completed');
+            lastRefreshTimeRef.current = Date.now();
+            
+            if (editCompleted === 'true') {
+              await AsyncStorage.removeItem('EDIT_COMPLETED');
+              console.log('Edit completed flag cleared');
+            }
+            
+            if (isMounted) {
+              try {
+                // Only set refreshing if we're not already loading
+                if (!refreshing && !loading) {
+                  setRefreshing(true);
+                }
+                
+                // Set a timeout to ensure we don't get stuck in loading state
+                const refreshPromise = refreshNotes().catch(err => {
+                  console.log('Caught refresh error:', err);
+                  return { success: false, error: err.message };
+                });
+                
+                const timeoutPromise = new Promise((resolve) => {
+                  setTimeout(() => {
+                    console.log('Refresh timeout reached');
+                    resolve({ success: true, timedOut: true });
+                  }, 5000); // 5 second timeout
+                });
+                
+                // Use Promise.race to handle potential hanging
+                try {
+                  await Promise.race([refreshPromise, timeoutPromise]);
+                } catch (raceError) {
+                  console.log('Error in refresh race:', raceError);
+                }
+                console.log('Notes refreshed from context or timed out');
+              } catch (error) {
+                console.error('Error refreshing notes on focus:', error);
+              } finally {
+                // Always reset refreshing state after a delay to ensure UI updates
+                if (isMounted) {
+                  setTimeout(() => {
+                    setRefreshing(false);
+                  }, 300);
+                }
+              }
+            }
+          } else {
+            console.log('Skipping refresh - not first load or after edit');
           }
-        ];
-        await AsyncStorage.setItem('notes', JSON.stringify(sampleNotes));
-        setNotes(sampleNotes);
-      }
-    } catch (error) {
-      console.log('Error loading notes:', error);
-    } finally {
-      setLoading(false);
-    }
+        } catch (error) {
+          console.error('Error checking refresh status:', error);
+        }
+      };
+      
+      // Execute the check and refresh
+      checkAndRefresh();
+      
+      return () => {
+        // Cleanup function when screen is unfocused
+        console.log('NotesListScreen unfocused');
+        isMounted = false;
+      };
+    }, []) // Remove dependencies to prevent infinite loops
+  );
+
+  // Handle pull-to-refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refreshNotes();
+    setRefreshing(false);
   };
 
   const handleSearchPress = () => {
@@ -152,6 +205,14 @@ const NotesListScreen = ({ navigation }) => {
           renderItem={renderNoteItem}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.notesList}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[isDarkMode ? "#4a9eff" : "#007AFF"]}
+              tintColor={isDarkMode ? "#4a9eff" : "#007AFF"}
+            />
+          }
         />
       ) : (
         <View style={[styles.emptyContainer, isDarkMode && { backgroundColor: 'transparent' }]}>

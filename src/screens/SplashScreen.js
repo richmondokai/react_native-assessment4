@@ -31,7 +31,7 @@ const SplashScreen = ({ onFinish }) => {
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Check if user is logged in
-        const userToken = await AsyncStorage.getItem('userToken');
+        const userToken = await AsyncStorage.getItem('AUTH_TOKEN');
         
         // Notify parent component that splash screen is done
         onFinish(userToken !== null);
